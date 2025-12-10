@@ -40,9 +40,12 @@ CATIDS = [
 def copy_main_to_stage():
     # delete stage, copy from main
     sb.table("satellites_stage").delete().neq("id", 0).execute()
-    res = sb.table("satellites_main").select("*").execute()
-    if res.error:
-        raise Exception(res.error)
+    
+    try:
+        res = sb.table("satellites_main").select("*").execute()
+    except Exception as e:
+        raise Exception(f"DB error: {e}")
+    
     data = res.data or []
     if data:
         # remove 'id' fields to allow new identity

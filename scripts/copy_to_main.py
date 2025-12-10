@@ -13,9 +13,11 @@ def copy_stage_to_main():
     sb.table("satellites_main").delete().neq("id", 0).execute()
 
     print("Getting stage data...")
-    res = sb.table("satellites_stage").select("*").execute()
-    if res.error:
-        raise Exception(res.error)
+    
+    try:
+        res = sb.table("satellites_stage").select("*").execute()
+    except Exception as e:
+        raise Exception(f"DB error: {e}")
     data = res.data or []
     # remove 'id' so auto identity will assign
     to_insert = []
