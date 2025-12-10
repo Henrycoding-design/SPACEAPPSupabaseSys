@@ -1,0 +1,70 @@
+name: Satellite Sync
+
+on:
+  schedule:
+    # every 10 days at 00:00 UTC (adjust to your desired schedule)
+    - cron: '0 0 */10 * *'
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run update_satellites (main work -> stage)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          N2YO_KEY: ${{ secrets.N2YO_KEY }}
+        run: |
+          python scripts/update_satellites.py
+
+      - name: Create approval and wait
+        id: approval
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          APPROVAL_BASE_URL: ${{ secrets.APPROVAL_BASE_URL }} # supabase function url
+          APPROVAL_EMAIL_TO: ${{ secrets.APPROVAL_EMAIL_TO }}
+          APPROVAL_EMAIL_FROM: ${{ secrets.APPROVAL_EMAIL_FROM }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+        run: |
+          python scripts/approval_check.py | tee approval.log
+
+      - name: Extract approval result
+        id: check
+        run: |
+          if grep -q "APPROVED=true" approval.log; then
+            echo "approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "approved=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Copy stage -> main (only if approved)
+        if: steps.check.outputs.approved == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python scripts/copy_to_main.py
+
+      - name: Notify result (always)
+        run: |
+          if [ "${{ steps.check.outputs.approved }}" = "true" ]; then
+            echo "Pipeline approved and applied."
+          else
+            echo "Pipeline NOT approved (or timed out)."
+          fi
