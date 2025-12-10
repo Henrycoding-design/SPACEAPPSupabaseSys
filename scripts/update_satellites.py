@@ -74,7 +74,7 @@ def scan_catid_locations(catid, max_new_per_cat=10):
                 .eq("norad_id", norad) \
                 .limit(1) \
                 .execute()
-                if exists.data is None:
+                if not exists.data:
                     # insert new
                     sb.table("satellites_stage").insert({
                         "norad_id": norad,
