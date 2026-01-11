@@ -53,17 +53,33 @@ def copy_main_to_stage():
             r.pop("id", None)
         sb.table("satellites_stage").insert(data).execute()
 
+def fetch_with_backoff(url, max_retries=8, base_delay=1):
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, timeout=50)
+            if 400 <= r.status_code < 500:
+                # Client error, do not retry
+                r.raise_for_status()
+            if r.status_code >= 500:
+                raise Exception(f"Server error: {r.status_code}")
+            return r.json()
+        except requests.HTTPError: # preserve raw 4xx errors and fail hard
+            raise
+        except Exception as e:
+            wait_time = min(base_delay * (2 ** attempt), 120)
+            print(f"Fetch error: {e}. Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+    raise Exception(f"Failed to fetch {url} after {max_retries} attempts.")
+
 def scan_catid_locations(catid, max_new_per_cat=10):
     new_count = 0
     for lat, lon in LOCATIONS:
         if new_count >= max_new_per_cat:
             break
-
+        
+        url = f"https://api.n2yo.com/rest/v1/satellite/above/{lat}/{lon}/0/70/{catid}/&apiKey={N2YO_KEY}"
         try:
-            url = f"https://api.n2yo.com/rest/v1/satellite/above/{lat}/{lon}/0/70/{catid}/&apiKey={N2YO_KEY}"
-            r = requests.get(url, timeout=50)
-            r.raise_for_status()
-            payload = r.json()
+            payload = fetch_with_backoff(url)
 
             for sat in payload.get("above", []):
                 norad = int(sat.get("satid"))
@@ -86,7 +102,7 @@ def scan_catid_locations(catid, max_new_per_cat=10):
                     if new_count >= max_new_per_cat:
                         break
         except Exception as e:
-            print("Scan error:", e)
+            print(f"Scan error:{e} for catid {catid} at loc ({lat},{lon})")
     return new_count
 
 def clean_stage(rate_sleep=7):
