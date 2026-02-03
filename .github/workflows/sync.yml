@@ -26,7 +26,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          N2YO_KEY: ${{ secrets.N2YO_KEY }}
+          N2YO_KEYS: ${{ secrets.N2YO_KEYS }}
         run: |
           python scripts/update_satellites.py
 
