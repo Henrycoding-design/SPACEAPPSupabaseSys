@@ -3,7 +3,7 @@ name: Satellite Sync
 on:
   schedule:
     # every 10 days at 00:00 UTC (adjust to your desired schedule)
-    - cron: '0 0 */10 * *'
+    - cron: '0 0 */5 * *'
   workflow_dispatch: {}
 
 jobs:

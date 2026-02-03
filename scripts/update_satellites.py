@@ -3,10 +3,11 @@ import os
 import time
 import requests
 from supabase import create_client
+from n2yo_key_manager import key_manager, N2YO_KEYS
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
-N2YO_KEY = os.getenv("N2YO_KEY")  # your N2YO key
+# N2YO_KEY = os.getenv("N2YO_KEY")  # your N2YO key
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Sample locations: (lat, lon) list. 10 major cities around the world.
@@ -53,23 +54,57 @@ def copy_main_to_stage():
             r.pop("id", None)
         sb.table("satellites_stage").insert(data).execute()
 
-def fetch_with_backoff(url, max_retries=8, base_delay=1):
+def sanity_check_keys():
+    for i, key in enumerate(N2YO_KEYS):
+        try:
+            test_url = f"https://api.n2yo.com/rest/v1/satellite/categories&apiKey={key}"
+            r = requests.get(test_url, timeout=20)
+            if r.status_code != 200:
+                raise Exception(f"HTTP err: {r.status_code}")
+        except Exception as e:
+            print(f"[WARN] N2YO key {i} failed sanity check: {e}")
+
+def fetch_with_backoff(url_builder, max_retries=8, base_delay=1):
+    tried_keys = set()
     for attempt in range(max_retries):
+        api_key = key_manager.current()
+        url = url_builder(api_key)
+
         try:
             r = requests.get(url, timeout=50)
+
+            # Key expired / rate limited → rotate + retry immediately
+            if r.status_code in (401, 403, 429):
+                tried_keys.add(api_key)
+                if len(tried_keys) >= len(key_manager.keys):
+                    tried_keys.clear()
+                    raise Exception("All API Keys exhausted")
+                print(f"[N2YO] Key issue ({r.status_code}), rotating key")
+                key_manager.rotate()
+                continue
+
             if 400 <= r.status_code < 500:
-                # Client error, do not retry
                 r.raise_for_status()
+
             if r.status_code >= 500:
-                raise Exception(f"Server error: {r.status_code}")
-            return r.json()
-        except requests.HTTPError: # preserve raw 4xx errors and fail hard
+                raise Exception(f"Server error {r.status_code}")
+
+            try:
+                return r.json()
+            except ValueError:
+                raise Exception("Invalid JSON from N2YO")
+
+        except requests.HTTPError:
             raise
         except Exception as e:
-            wait_time = min(base_delay * (2 ** attempt), 120)
-            print(f"Fetch error: {e}. Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
-    raise Exception(f"Failed to fetch {url} after {max_retries} attempts.")
+            wait = min(base_delay * (2 ** attempt), 120)
+            print(f"Fetch error: {e}. Retry in {wait}s")
+            time.sleep(wait)
+
+    raise Exception("Fetch failed after retries")
+
+def validate_tle(norad):
+    return fetch_with_backoff(lambda k: f"https://api.n2yo.com/rest/v1/satellite/tle/{norad}&apiKey={k}")
 
 def scan_catid_locations(catid, max_new_per_cat=10):
     new_count = 0
@@ -77,9 +112,8 @@ def scan_catid_locations(catid, max_new_per_cat=10):
         if new_count >= max_new_per_cat:
             break
         
-        url = f"https://api.n2yo.com/rest/v1/satellite/above/{lat}/{lon}/0/70/{catid}/&apiKey={N2YO_KEY}"
         try:
-            payload = fetch_with_backoff(url)
+            payload = fetch_with_backoff(lambda k: f"https://api.n2yo.com/rest/v1/satellite/above/{lat}/{lon}/0/70/{catid}/&apiKey={k}")
 
             for sat in payload.get("above", []):
                 norad = int(sat.get("satid"))
@@ -114,25 +148,26 @@ def clean_stage(rate_sleep=7):
         # call N2YO tle endpoint to verify
         try:
             # Example TLE endpoint from N2YO (replace with correct path)
-            tle_url = f"https://api.n2yo.com/rest/v1/satellite/tle/{norad}&apiKey={N2YO_KEY}"
-            r = requests.get(tle_url, timeout=50)
-            if r.status_code == 200 and r.text:
-                # consider it valid; update timestamp and ensure status True
-                sb.table("satellites_stage").update({
-                    "status": True,
-                    "updated_at": "now()"
-                }).eq("norad_id", norad).execute()
-            else:
-                # not found or invalid
-                sb.table("satellites_stage").update({
-                    "status": False,
-                    "updated_at": "now()"
-                }).eq("norad_id", norad).execute()
+            payload = validate_tle(norad)
+            # consider it valid; update timestamp and ensure status True
+            sb.table("satellites_stage").update({
+                "status": True,
+                "updated_at": "now()"
+            }).eq("norad_id", norad).execute()
         except Exception as e:
+            # not found or invalid
+            sb.table("satellites_stage").update({
+                "status": False,
+                "updated_at": "now()"
+            }).eq("norad_id", norad).execute()
             print("Clean error for", norad, e)
+
         time.sleep(rate_sleep)
 
 def main():
+    print("Checking Keys...")
+    sanity_check_keys()
+
     print("Copy main -> stage")
     copy_main_to_stage()
 
