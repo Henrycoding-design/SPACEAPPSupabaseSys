@@ -26,7 +26,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          N2YO_KEYS: ${{ secrets.N2YO_KEYS }}
+          N2YO_KEY: ${{ secrets.N2YO_KEY }}
         run: |
           python scripts/update_satellites.py
 
@@ -37,7 +37,7 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           APPROVAL_BASE_URL: ${{ secrets.APPROVAL_BASE_URL }} # supabase function url
           APPROVAL_EMAIL_TO: ${{ secrets.APPROVAL_EMAIL_TO }}
-          APPROVAL_EMAIL_FROM: ${{ secrets.APPROVAL_EMAIL_FROM }}
+          APPROVAL_EMAIL_FROM: ${{ secrets.APPROVAL_GMAIL_FROM }}
           GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
           GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
