@@ -25,7 +25,7 @@ sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 def generate_code():
     return secrets.token_urlsafe(24)
 
-def create_approval_row(code, ttl_hours=8):
+def create_approval_row(code, ttl_hours=6):
     expires_at = int(time.time() + ttl_hours * 3600)
     payload = {
         "code": code,
